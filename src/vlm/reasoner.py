@@ -22,6 +22,8 @@ class VLMReasoner:
             return backend
 
         # Check for API keys first
+        if os.environ.get("GEMINI_API_KEY"):
+            return "gemini"
         if os.environ.get("ANTHROPIC_API_KEY"):
             return "anthropic"
         if os.environ.get("OPENAI_API_KEY"):
@@ -41,6 +43,8 @@ class VLMReasoner:
             self._init_anthropic()
         elif self.backend == "openai":
             self._init_openai()
+        elif self.backend == "gemini":
+            self._init_gemini()
         elif self.backend == "mock":
             print("Warning: Using mock VLM backend")
 
@@ -83,11 +87,42 @@ class VLMReasoner:
         from openai import OpenAI
         self.client = OpenAI()
 
+    def _init_gemini(self):
+        """Initialize Gemini API."""
+        import google.generativeai as genai
+        
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not set")
+        
+        genai.configure(api_key=api_key)
+        self.gemini_model = genai.GenerativeModel('gemini-2.5-pro')
+        print("Gemini 1.5 Pro initialized!")
+
+    def _analyze_gemini(self, image_path: str) -> Dict:
+        """Analyze image using Gemini 1.5 Pro."""
+        from PIL import Image
+        
+        image = Image.open(image_path)
+        
+        prompt = """Analyze this real estate image for AI manipulation. Check shadows, reflections, geometry, textures.
+
+Respond EXACTLY in this format (no extra text):
+MANIPULATION_DETECTED: YES or NO or UNCERTAIN
+CONFIDENCE: HIGH or MEDIUM or LOW
+MANIPULATION_TYPE: authentic or virtual_staging or inpainting or full_synthesis
+REASONING: Two sentences explaining why."""
+
+        response = self.gemini_model.generate_content([prompt, image])
+        return self._parse_structured_response(response.text)
+
     def analyze(self, image_path: str) -> Dict:
         if self.backend == "qwen2vl":
             return self._analyze_qwen2vl(image_path)
         elif self.backend == "blip2":
             return self._analyze_blip2(image_path)
+        elif self.backend == "gemini":
+            return self._analyze_gemini(image_path)
         elif self.backend == "anthropic":
             return self._analyze_anthropic(image_path)
         elif self.backend == "openai":
@@ -328,3 +363,42 @@ REASONING: Two sentences explaining why."""
                 break
 
         return result
+
+
+class GeminiVLMReasoner(VLMReasoner):
+    """Gemini-specific VLM reasoner."""
+    
+    def __init__(self):
+        self.backend = "gemini"
+        self._init_gemini()
+    
+    def _init_gemini(self):
+        """Initialize Gemini API."""
+        import google.generativeai as genai
+        import os
+        
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not set")
+        
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel('gemini-1.5-pro')
+        print("Gemini 1.5 Pro initialized!")
+    
+    def analyze(self, image_path: str) -> Dict:
+        """Analyze image using Gemini."""
+        import google.generativeai as genai
+        from PIL import Image
+        
+        image = Image.open(image_path)
+        
+        prompt = """Analyze this real estate image for AI manipulation. Check shadows, reflections, geometry, textures.
+
+Respond EXACTLY in this format (no extra text):
+MANIPULATION_DETECTED: YES or NO or UNCERTAIN
+CONFIDENCE: HIGH or MEDIUM or LOW
+MANIPULATION_TYPE: authentic or virtual_staging or inpainting or full_synthesis
+REASONING: Two sentences explaining why."""
+
+        response = self.model.generate_content([prompt, image])
+        return self._parse_structured_response(response.text)
