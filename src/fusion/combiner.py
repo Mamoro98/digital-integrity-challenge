@@ -32,11 +32,22 @@ class FusionModule:
         # Convert VLM result to score
         vlm_score = self._vlm_to_score(vlm_results)
 
+        # Check for strong sharpness anomalies (oversharpening/blur)
+        sharpness_score = forensic_results.get("sharpness_score", 0)
+        noise_score = forensic_results.get("noise_score", 0)
+        strong_sharpness_anomaly = sharpness_score > 0.65
+        strong_noise_anomaly = noise_score > 0.65
+
         # Adaptive weighting: if VLM is uncertain, rely more on forensics
         vlm_confidence = vlm_results.get("confidence", "low")
         is_vlm_uncertain = vlm_results.get("manipulation_detected", "uncertain") == "uncertain"
 
-        if is_vlm_uncertain or vlm_confidence == "low":
+        # Override: trust forensics when strong pixel-level anomalies detected
+        # VLM often misses sharpness/noise artifacts that forensics catches
+        if strong_sharpness_anomaly or strong_noise_anomaly:
+            f_weight = 0.80
+            v_weight = 0.20
+        elif is_vlm_uncertain or vlm_confidence == "low":
             # VLM is uncertain - rely primarily on forensics
             f_weight = 0.85
             v_weight = 0.15
@@ -44,11 +55,23 @@ class FusionModule:
             f_weight = self.forensic_weight
             v_weight = self.vlm_weight
         else:  # high confidence VLM
-            f_weight = 0.35
-            v_weight = 0.65
+            f_weight = 0.40
+            v_weight = 0.60
 
         # Weighted combination
         raw_score = f_weight * forensic_score + v_weight * vlm_score
+
+        # Boost score when forensics detect strong sharpness artifacts
+        # VLM cannot reliably detect oversharpening/blur
+        # Require BOTH high sharpness AND elevated aggregate forensic to avoid FPs
+        if sharpness_score > 0.70 and forensic_score > 0.45:
+            raw_score = max(raw_score, 0.50 + (sharpness_score - 0.70) * 0.5)
+
+        # Dampen false positives: when forensics are low/moderate but VLM says manipulated
+        # VLM can make semantic interpretation errors (e.g., dramatic skies)
+        if forensic_score < 0.45 and vlm_score > 0.6:
+            # Forensics should have the final say when pixel-level is clean
+            raw_score = min(raw_score, 0.42)
 
         # Calibration: stretch scores to improve separation
         # Apply sigmoid-like transformation
