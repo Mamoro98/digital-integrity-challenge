@@ -13,6 +13,9 @@ accelerate>=0.25.0
 # Qwen2-VL local model (default fallback - no API key needed)
 qwen-vl-utils
 
+# GPU optimization (optional, for 4-bit quantization)
+bitsandbytes>=0.41.0
+
 # API-based VLM options (faster, if API keys available)
 google-generativeai>=0.3.0
 anthropic>=0.18.0

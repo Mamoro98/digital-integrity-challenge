@@ -129,11 +129,15 @@ class VLMReasoner:
         self.device = self._get_device()
         print(f"Using device: {self.device}")
 
-        # Use appropriate dtype based on device
+        # GPU-optimized settings
         if self.device == "cuda":
-            dtype = torch.float16
+            dtype = torch.float16  # Fast on GPU
+            device_map = "auto"   # Auto-shard across GPUs
+            print("GPU detected - using float16 with auto device mapping")
         else:
             dtype = torch.float32
+            device_map = None
+            print("CPU mode - this may be slow for large models")
 
         try:
             self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
@@ -141,18 +145,35 @@ class VLMReasoner:
             from transformers import Qwen2VLProcessor
             self.processor = Qwen2VLProcessor.from_pretrained(model_id)
 
-        self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-            model_id,
-            torch_dtype=dtype,
-            device_map="auto" if self.device == "cuda" else None,
-            trust_remote_code=True,
-        )
+        # Load with GPU optimization
+        load_kwargs = {
+            "torch_dtype": dtype,
+            "trust_remote_code": True,
+            "low_cpu_mem_usage": True,  # Reduce CPU RAM during load
+        }
         
-        if self.device != "cuda":
+        if device_map:
+            load_kwargs["device_map"] = device_map
+        
+        # For very large models on GPU, try 4-bit quantization
+        if "72B" in model_id and self.device == "cuda":
+            try:
+                from transformers import BitsAndBytesConfig
+                load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                )
+                print("Using 4-bit quantization for 72B model")
+            except ImportError:
+                print("bitsandbytes not available, loading in float16")
+
+        self.model = Qwen2VLForConditionalGeneration.from_pretrained(model_id, **load_kwargs)
+        
+        if self.device != "cuda" and device_map is None:
             self.model = self.model.to(self.device)
         
         self.model.eval()
-        print("Qwen2-VL loaded successfully!")
+        print(f"Qwen2-VL loaded successfully on {self.device}!")
 
     def _init_paligemma(self):
         """Initialize PaliGemma2-28B on TPU via JAX."""
