@@ -3,17 +3,17 @@ numpy>=1.24.0
 opencv-python>=4.8.0
 Pillow>=10.0.0
 scipy>=1.11.0
+tqdm>=4.65.0
 
-# VLM options (uncomment based on your setup)
-# For Qwen2-VL (local GPU):
-# transformers>=4.37.0
-# torch>=2.0.0
-# accelerate>=0.25.0
-# qwen-vl-utils
+# Deep learning (for local VLM fallback)
+torch>=2.0.0
+transformers>=4.37.0
+accelerate>=0.25.0
 
-# For API-based VLM:
+# Qwen2-VL local model (default fallback - no API key needed)
+qwen-vl-utils
+
+# API-based VLM options (faster, if API keys available)
+google-generativeai>=0.3.0
 anthropic>=0.18.0
 openai>=1.0.0
-
-# Utilities
-tqdm>=4.65.0
