@@ -14,7 +14,7 @@ accelerate>=0.25.0
 qwen-vl-utils
 
 # GPU optimization (optional, for 4-bit quantization)
-bitsandbytes>=0.41.0
+# bitsandbytes>=0.41.0  # Optional: uncomment for 4-bit quantization on CUDA GPUs
 
 # API-based VLM options (faster, if API keys available)
 google-generativeai>=0.3.0

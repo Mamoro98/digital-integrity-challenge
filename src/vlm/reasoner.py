@@ -4,8 +4,13 @@ Semantic-level analysis using Vision-Language Models
 """
 
 import os
+import signal
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Dict
 from pathlib import Path
+
+# VLM inference timeout in seconds
+VLM_TIMEOUT_SECONDS = 30
 
 
 class VLMReasoner:
@@ -109,21 +114,6 @@ class VLMReasoner:
             "Qwen/Qwen2-VL-72B-Instruct",  # ~150GB RAM / ~40GB VRAM (4-bit)
             "Qwen/Qwen2-VL-7B-Instruct",   # ~28GB RAM / ~14GB VRAM
         ]
-        
-        model_id = None
-        for candidate in model_candidates:
-            try:
-                print(f"Trying {candidate}...")
-                model_id = candidate
-                break
-            except Exception as e:
-                print(f"{candidate} not available: {e}")
-                continue
-        
-        if not model_id:
-            model_id = "Qwen/Qwen2-VL-7B-Instruct"
-        
-        print(f"Loading {model_id}...")
 
         self.device = self._get_device()
         print(f"Using device: {self.device}")
@@ -138,89 +128,117 @@ class VLMReasoner:
             device_map = None
             print("CPU mode - this may be slow for large models")
 
-        try:
-            self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        except:
-            from transformers import Qwen2VLProcessor
-            self.processor = Qwen2VLProcessor.from_pretrained(model_id)
-
-        # Load with GPU optimization
-        load_kwargs = {
-            "torch_dtype": dtype,
-            "trust_remote_code": True,
-            "low_cpu_mem_usage": True,  # Reduce CPU RAM during load
-        }
-        
-        if device_map:
-            load_kwargs["device_map"] = device_map
-        
-        # For very large models on GPU, try 4-bit quantization
-        if "72B" in model_id and self.device == "cuda":
+        # Actually try loading each model candidate
+        last_error = None
+        for model_id in model_candidates:
             try:
-                from transformers import BitsAndBytesConfig
-                load_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
-                )
-                print("Using 4-bit quantization for 72B model")
-            except ImportError:
-                print("bitsandbytes not available, loading in float16")
+                print(f"Trying to load {model_id}...")
 
-        self.model = Qwen2VLForConditionalGeneration.from_pretrained(model_id, **load_kwargs)
-        
-        if self.device != "cuda" and device_map is None:
-            self.model = self.model.to(self.device)
-        
-        self.model.eval()
-        print(f"Qwen2-VL loaded successfully on {self.device}!")
+                # Try loading processor
+                try:
+                    self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+                except:
+                    from transformers import Qwen2VLProcessor
+                    self.processor = Qwen2VLProcessor.from_pretrained(model_id)
+
+                # Build load kwargs
+                load_kwargs = {
+                    "torch_dtype": dtype,
+                    "trust_remote_code": True,
+                    "low_cpu_mem_usage": True,
+                }
+
+                if device_map:
+                    load_kwargs["device_map"] = device_map
+
+                # For 72B on GPU, try 4-bit quantization
+                if "72B" in model_id and self.device == "cuda":
+                    try:
+                        from transformers import BitsAndBytesConfig
+                        load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                            load_in_4bit=True,
+                            bnb_4bit_compute_dtype=torch.float16,
+                        )
+                        print("Using 4-bit quantization for 72B model")
+                    except ImportError:
+                        print("bitsandbytes not available, loading in float16")
+
+                # Load model
+                self.model = Qwen2VLForConditionalGeneration.from_pretrained(model_id, **load_kwargs)
+
+                if self.device != "cuda" and device_map is None:
+                    self.model = self.model.to(self.device)
+
+                self.model.eval()
+                print(f"Qwen2-VL loaded successfully: {model_id} on {self.device}!")
+                return  # Success - exit the function
+
+            except Exception as e:
+                print(f"{model_id} failed to load: {e}")
+                last_error = e
+                continue
+
+        # All candidates failed
+        raise RuntimeError(f"Could not load any Qwen2-VL model. Last error: {last_error}")
 
     def _init_paligemma(self):
-        """Initialize PaliGemma2-28B on TPU via JAX."""
-        print("Initializing PaliGemma2-28B on TPU...")
-        
+        """Initialize PaliGemma2 model with PyTorch (CPU/GPU)."""
+        print("Initializing PaliGemma2...")
+
         try:
-            import jax
-            import jax.numpy as jnp
             from transformers import AutoProcessor, PaliGemmaForConditionalGeneration
             import torch
         except ImportError as e:
             raise ImportError(f"PaliGemma dependencies not available: {e}")
-        
-        # Check TPU availability
-        devices = jax.devices()
-        if not any('TPU' in str(d) for d in devices):
-            raise RuntimeError("No TPU devices found for PaliGemma")
-        
-        print(f"Found {len(devices)} TPU devices")
-        
-        # Try largest model first
+
+        self.device = self._get_device()
+        print(f"Using device: {self.device}")
+
+        # GPU-optimized settings
+        if self.device == "cuda":
+            dtype = torch.bfloat16
+            device_map = "auto"
+            print("GPU detected - using bfloat16 with auto device mapping")
+        else:
+            dtype = torch.float32
+            device_map = None
+            print("CPU mode - this may be slow for large models")
+
+        # Try largest model first, fall back to smaller
         model_candidates = [
             "google/paligemma2-28b-pt-896",  # Largest, best quality
             "google/paligemma2-10b-pt-896",  # Fallback
         ]
-        
-        model_id = None
-        for candidate in model_candidates:
+
+        last_error = None
+        for model_id in model_candidates:
             try:
-                print(f"Trying {candidate}...")
-                self.processor = AutoProcessor.from_pretrained(candidate, trust_remote_code=True)
-                self.model = PaliGemmaForConditionalGeneration.from_pretrained(
-                    candidate,
-                    torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                    trust_remote_code=True,
-                )
-                model_id = candidate
-                break
+                print(f"Trying to load {model_id}...")
+                self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+
+                load_kwargs = {
+                    "torch_dtype": dtype,
+                    "trust_remote_code": True,
+                    "low_cpu_mem_usage": True,
+                }
+                if device_map:
+                    load_kwargs["device_map"] = device_map
+
+                self.model = PaliGemmaForConditionalGeneration.from_pretrained(model_id, **load_kwargs)
+
+                if self.device != "cuda" and device_map is None:
+                    self.model = self.model.to(self.device)
+
+                self.model.eval()
+                print(f"PaliGemma loaded successfully: {model_id} on {self.device}!")
+                return  # Success
+
             except Exception as e:
-                print(f"{candidate} failed: {e}")
+                print(f"{model_id} failed to load: {e}")
+                last_error = e
                 continue
-        
-        if not model_id:
-            raise RuntimeError("Could not load any PaliGemma model")
-        
-        self.model.eval()
-        print(f"PaliGemma loaded: {model_id}")
+
+        raise RuntimeError(f"Could not load any PaliGemma model. Last error: {last_error}")
 
     def _init_blip2(self):
         """Initialize BLIP-2 as fallback."""
@@ -267,8 +285,12 @@ class VLMReasoner:
         print("Gemini initialized!")
 
     def analyze(self, image_path: str) -> Dict:
-        """Analyze an image for manipulation."""
-        try:
+        """Analyze an image for manipulation with timeout protection."""
+        # Mock backend doesn't need timeout
+        if self.backend == "mock":
+            return self._analyze_mock(image_path)
+
+        def _run_analysis():
             if self.backend == "qwen2vl":
                 return self._analyze_qwen2vl(image_path)
             elif self.backend == "paligemma":
@@ -283,6 +305,15 @@ class VLMReasoner:
                 return self._analyze_openai(image_path)
             else:
                 return self._analyze_mock(image_path)
+
+        try:
+            # Run analysis with timeout
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_run_analysis)
+                return future.result(timeout=VLM_TIMEOUT_SECONDS)
+        except FuturesTimeoutError:
+            print(f"VLM inference timed out after {VLM_TIMEOUT_SECONDS} seconds")
+            return self._analyze_mock(image_path)
         except Exception as e:
             print(f"Analysis error: {e}")
             return self._analyze_mock(image_path)

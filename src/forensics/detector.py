@@ -122,23 +122,19 @@ class ForensicDetector:
         # Load original
         original = Image.open(image_path).convert('RGB')
 
-        # Resave at known quality
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+        # Resave at known quality using proper context manager for cleanup
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=True) as tmp:
             tmp_path = tmp.name
             original.save(tmp_path, 'JPEG', quality=self.ela_quality)
+            # Load resaved image while temp file still exists
             resaved = Image.open(tmp_path)
+            # Force load into memory before temp file is deleted
+            resaved_arr = np.array(resaved, dtype=np.float32)
 
-        # Calculate difference
+        # Calculate difference (temp file auto-cleaned by context manager)
         orig_arr = np.array(original, dtype=np.float32)
-        resaved_arr = np.array(resaved, dtype=np.float32)
 
         ela = np.abs(orig_arr - resaved_arr)
-
-        # Clean up temp file
-        try:
-            os.unlink(tmp_path)
-        except:
-            pass
 
         # Analyze ELA by regions
         h, w = ela.shape[:2]
