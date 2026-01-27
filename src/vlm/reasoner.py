@@ -104,11 +104,10 @@ class VLMReasoner:
             from transformers import AutoModelForVision2Seq, AutoProcessor
             Qwen2VLForConditionalGeneration = AutoModelForVision2Seq
 
-        # Try 72B first (best quality), fall back to smaller if needed
+        # Try 72B first (best quality), fall back to 7B
         model_candidates = [
-            "Qwen/Qwen2-VL-72B-Instruct",  # ~150GB RAM
-            "Qwen/Qwen2-VL-7B-Instruct",   # ~28GB RAM
-            "Qwen/Qwen2-VL-2B-Instruct",   # ~8GB RAM
+            "Qwen/Qwen2-VL-72B-Instruct",  # ~150GB RAM / ~40GB VRAM (4-bit)
+            "Qwen/Qwen2-VL-7B-Instruct",   # ~28GB RAM / ~14GB VRAM
         ]
         
         model_id = None
@@ -122,7 +121,7 @@ class VLMReasoner:
                 continue
         
         if not model_id:
-            model_id = "Qwen/Qwen2-VL-2B-Instruct"
+            model_id = "Qwen/Qwen2-VL-7B-Instruct"
         
         print(f"Loading {model_id}...")
 
@@ -197,8 +196,7 @@ class VLMReasoner:
         # Try largest model first
         model_candidates = [
             "google/paligemma2-28b-pt-896",  # Largest, best quality
-            "google/paligemma2-10b-pt-896",
-            "google/paligemma2-3b-pt-896",
+            "google/paligemma2-10b-pt-896",  # Fallback
         ]
         
         model_id = None
