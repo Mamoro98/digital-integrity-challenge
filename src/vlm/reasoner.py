@@ -45,12 +45,12 @@ Answer: REAL or FAKE, then explain briefly."""
 class VLMReasoner:
     """Uses local VLMs to detect semantic anomalies. TPU-optimized."""
 
-    # Model priority: smallest first to save disk space
+    # Model priority: largest/best first for better reasoning
     MODEL_PRIORITY = [
-        "blip2",       # ~5GB, already cached
-        "paligemma",   # ~4GB for 3B, TPU optimized
-        "qwen2vl",     # ~4GB for 2B version
-        "mock",        # Fallback
+        "qwen2vl",     # Best: 72B/7B available
+        "paligemma",   # Good: 28B/10B available
+        "blip2",       # Fallback: 2.7B
+        "mock",        # Last resort
     ]
 
     def __init__(self, backend: str = "auto", use_tpu: bool = True):
@@ -238,10 +238,12 @@ class VLMReasoner:
 
         self.device = self._get_device()
 
-        # Use smallest PaliGemma model (3B)
+        # Use larger PaliGemma models (bigger = better reasoning)
         model_candidates = [
-            "google/paligemma-3b-pt-224",   # ~6GB, smallest
-            "google/paligemma-3b-pt-448",   # ~6GB, higher res
+            "google/paligemma2-28b-pt-896",  # ~56GB, best
+            "google/paligemma2-10b-pt-448",  # ~20GB, good balance
+            "google/paligemma-3b-pt-448",    # ~6GB, fallback
+            "google/paligemma-3b-pt-224",    # ~6GB, smallest
         ]
 
         dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
@@ -281,10 +283,11 @@ class VLMReasoner:
 
         self.device = self._get_device()
 
-        # Use smallest Qwen2-VL model
+        # Use larger Qwen2-VL models (bigger = better reasoning)
         model_candidates = [
-            "Qwen/Qwen2-VL-2B-Instruct",   # ~4GB, smallest
-            "Qwen/Qwen2-VL-7B-Instruct",   # ~14GB
+            "Qwen/Qwen2-VL-72B-Instruct",  # ~140GB, best quality
+            "Qwen/Qwen2-VL-7B-Instruct",   # ~14GB, good balance
+            "Qwen/Qwen2-VL-2B-Instruct",   # ~4GB, fallback
         ]
 
         dtype = torch.float16 if self.device == "cuda" else torch.float32
