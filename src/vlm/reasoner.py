@@ -283,9 +283,11 @@ class VLMReasoner:
 
         self.device = self._get_device()
 
-        # Use Qwen2-VL-7B (best balance of quality and size)
+        # Use larger Qwen2-VL models (bigger = better reasoning)
         model_candidates = [
-            "Qwen/Qwen2-VL-7B-Instruct",   # ~16GB, good balance
+            "Qwen/Qwen2-VL-72B-Instruct",  # ~140GB, best quality
+            "Qwen/Qwen2-VL-7B-Instruct",   # ~14GB, good balance
+            "Qwen/Qwen2-VL-2B-Instruct",   # ~4GB, fallback
         ]
 
         dtype = torch.float16 if self.device == "cuda" else torch.float32
