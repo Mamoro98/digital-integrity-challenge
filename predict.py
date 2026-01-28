@@ -47,6 +47,10 @@ def process_image(image_path: str, forensic: ForensicDetector, vlm: VLMReasoner,
                 "compression": forensic_results.get("compression_score", 0),
                 "edge": forensic_results.get("edge_score", 0),
                 "sharpness": forensic_results.get("sharpness_score", 0),
+                "rich_poor_texture": forensic_results.get("rich_poor_texture_score", 0),
+                "color_consistency": forensic_results.get("color_consistency_score", 0),
+                "lbp": forensic_results.get("lbp_score", 0),
+                "glcm": forensic_results.get("glcm_score", 0),
             }
         }
     }
@@ -75,8 +79,9 @@ def main():
         images = [Path(args.image)]
     else:
         input_path = Path(args.input_dir)
-        image_extensions = {'.jpg', '.jpeg', '.png', '.webp'}
-        images = [f for f in input_path.iterdir() if f.suffix.lower() in image_extensions]
+        image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.bmp'}
+        # Recursively find all images
+        images = [f for f in input_path.rglob('*') if f.suffix.lower() in image_extensions]
 
     print(f"Found {len(images)} images to process")
 

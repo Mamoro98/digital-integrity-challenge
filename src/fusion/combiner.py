@@ -77,8 +77,16 @@ class FusionModule:
         # Apply sigmoid-like transformation
         # This pushes low scores lower and high scores higher
         import math
-        center = 0.42  # Threshold between real and fake
-        steepness = 6.0  # How sharply to separate
+
+        # Calibration center - tuned for balanced accuracy
+        # Real avg=0.446, Fake avg=0.503 on ai_generated_v2 dataset
+        if is_vlm_uncertain:
+            center = 0.45  # Balance between FP and FN
+            steepness = 5.0
+        else:
+            center = 0.42  # Normal threshold with VLM
+            steepness = 6.0
+
         normalized = (raw_score - center) * steepness
         final_score = 1 / (1 + math.exp(-normalized))
 
@@ -128,80 +136,113 @@ class FusionModule:
         """Determine the most likely manipulation type."""
 
         # If score is low, it's likely authentic
-        if final_score < 0.35:
+        if final_score < 0.48:
             return "authentic"
 
-        # Use VLM type if confident
+        # Use VLM type if confident and specific
         vlm_type = vlm.get("manipulation_type", "unknown")
-        if vlm_type and vlm_type not in ["unknown", "authentic", "manipulation_detected"]:
+        vlm_confidence = vlm.get("confidence", "low")
+        if vlm_type and vlm_type not in ["unknown", "authentic", "manipulation_detected"] and vlm_confidence != "low":
             return vlm_type
 
         # Infer from forensic signals
-        ela_score = forensic.get("ela_score", 0)
+        sharpness_score = forensic.get("sharpness_score", 0)
         texture_score = forensic.get("texture_score", 0)
         noise_score = forensic.get("noise_score", 0)
+        compression_score = forensic.get("compression_score", 0)
         edge_score = forensic.get("edge_score", 0)
 
-        # High noise uniformity suggests AI generation or heavy processing
-        if noise_score > 0.7:
+        # High noise uniformity suggests AI generation
+        if noise_score > 0.65:
             return "full_synthesis"
 
-        # High ELA variance suggests inpainting/splicing
-        if ela_score > 0.6:
-            return "inpainting"
+        # High sharpness with noise suggests enhancement/filter
+        if sharpness_score > 0.65 and noise_score > 0.4:
+            return "filter"
 
-        # High texture smoothness suggests virtual staging or AI
-        if texture_score > 0.5:
+        # Very smooth textures suggest virtual staging
+        if texture_score > 0.45:
             return "virtual_staging"
+
+        # High compression differences suggest splicing/inpainting
+        if compression_score > 0.72:
+            return "inpainting"
 
         # Edge issues might indicate manipulation
         if edge_score > 0.5:
-            return "manipulation_detected"
+            return "inpainting"
 
-        # Default if score is high but no specific type
-        if final_score > 0.5:
+        # Default for high scores
+        if final_score > 0.55:
             return "manipulation_detected"
 
         return "authentic"
 
     def _generate_reasoning(self, forensic: Dict, vlm: Dict) -> str:
-        """Generate human-readable reasoning."""
+        """Generate human-readable reasoning based on forensic and VLM analysis."""
 
         reasons = []
+        agg_score = forensic.get("aggregate_score", 0.5)
 
-        # VLM reasoning
+        # VLM reasoning (if available and not mock)
         vlm_reasoning = vlm.get("reasoning", "")
-        if vlm_reasoning and "mock" not in vlm_reasoning.lower():
-            reasons.append(vlm_reasoning)
+        if vlm_reasoning and "unavailable" not in vlm_reasoning.lower() and "Visual analysis completed" not in vlm_reasoning:
+            reasons.append(f"VLM observations: {vlm_reasoning}")
 
-        # Forensic insights (thresholds tuned for meaningful signals)
+        # Detailed forensic insights based on research
         forensic_insights = []
 
-        if forensic.get("noise_score", 0) > 0.6:
-            forensic_insights.append("uniform noise patterns suggest artificial processing")
+        # Sharpness analysis (strongest discriminator)
+        sharpness = forensic.get("sharpness_score", 0)
+        if sharpness > 0.7:
+            forensic_insights.append("significant oversharpening artifacts detected, common in AI enhancement")
+        elif sharpness > 0.55:
+            forensic_insights.append("moderate sharpness anomalies suggest post-processing")
 
-        if forensic.get("sharpness_score", 0) > 0.6:
-            forensic_insights.append("oversharpening or blur artifacts detected")
+        # Noise analysis (AI images have different noise patterns)
+        noise = forensic.get("noise_score", 0)
+        if noise > 0.7:
+            forensic_insights.append("uniform noise patterns indicate AI-generated content")
+        elif noise > 0.5:
+            forensic_insights.append("noise distribution shows artificial smoothing")
 
-        if forensic.get("texture_score", 0) > 0.45:
-            forensic_insights.append("unnaturally smooth textures observed")
+        # Compression analysis
+        compression = forensic.get("compression_score", 0)
+        if compression > 0.75:
+            forensic_insights.append("compression artifacts suggest digital manipulation")
+        elif compression > 0.6:
+            forensic_insights.append("minor compression inconsistencies noted")
 
-        if forensic.get("edge_score", 0) > 0.45:
-            forensic_insights.append("edge coherence anomalies found")
+        # Texture analysis
+        texture = forensic.get("texture_score", 0)
+        if texture > 0.5:
+            forensic_insights.append("unnaturally smooth textures on walls or surfaces")
+        elif texture > 0.35:
+            forensic_insights.append("subtle texture smoothing detected")
 
+        # Edge coherence
+        edge = forensic.get("edge_score", 0)
+        if edge > 0.5:
+            forensic_insights.append("edge boundary anomalies around objects")
+
+        # Build final reasoning
         if forensic_insights:
-            reasons.append("Forensic analysis: " + ", ".join(forensic_insights) + ".")
+            # Take top 2 most significant findings
+            top_insights = forensic_insights[:2]
+            reasons.append("Forensic analysis detected: " + "; ".join(top_insights) + ".")
 
+        # Generate appropriate conclusion if no specific insights
         if not reasons:
-            agg_score = forensic.get("aggregate_score", 0.5)
-            if agg_score < 0.4:
-                return "Image appears authentic with consistent lighting, shadows, and textures."
+            if agg_score < 0.38:
+                return "Image appears authentic with natural lighting, consistent shadows, and realistic textures throughout."
+            elif agg_score < 0.48:
+                return "Image shows minor processing artifacts but overall appears to be an authentic photograph."
             elif agg_score < 0.55:
-                return "Image shows minor anomalies but appears largely authentic."
+                return "Image has borderline characteristics that warrant closer inspection for potential manipulation."
             else:
-                return "Some anomalies detected that may indicate manipulation."
+                return "Multiple forensic signals indicate potential AI manipulation or heavy post-processing."
 
-        # Combine and limit length
+        # Combine reasoning (max 2 sentences for competition format)
         combined = " ".join(reasons)
         sentences = combined.replace(". ", ".|").split("|")
         result = ". ".join(s.strip() for s in sentences[:2] if s.strip())
