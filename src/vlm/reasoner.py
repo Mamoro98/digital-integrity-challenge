@@ -45,10 +45,12 @@ Answer: REAL or FAKE, then explain briefly."""
 class VLMReasoner:
     """Uses local VLMs to detect semantic anomalies. TPU-optimized."""
 
-    # Model priority: Qwen2-VL only (best reasoning)
+    # Model priority: largest/best first for better reasoning
     MODEL_PRIORITY = [
-        "qwen2vl",     # Best: Qwen2-VL-7B-Instruct (16GB)
-        "mock",        # Fallback: forensics only
+        "qwen2vl",     # Best: 72B/7B available
+        "paligemma",   # Good: 28B/10B available
+        "blip2",       # Fallback: 2.7B
+        "mock",        # Last resort
     ]
 
     def __init__(self, backend: str = "auto", use_tpu: bool = True):
