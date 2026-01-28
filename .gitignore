@@ -8,10 +8,11 @@ dist/
 build/
 
 # Data and outputs (don't commit large files)
-data/real/
-data/manipulated/
+data/
+datasets/
 outputs/
 *.json
+*.zip
 
 # Environment
 .env
